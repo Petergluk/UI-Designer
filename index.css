@@ -674,11 +674,6 @@ html, body {
 
 /* Responsive Grid for smaller screens */
 @media (max-width: 1024px) {
-    /* Hide creator credit when generation has started on mobile */
-    .creator-credit.hide-on-mobile {
-        display: none !important;
-    }
-
     .artifact-grid {
         grid-template-columns: 1fr;
         height: 100%;

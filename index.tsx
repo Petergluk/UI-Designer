@@ -45,6 +45,8 @@ function App() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [savedStyles, setSavedStyles] = useState<string[]>(['Glassmorphism', 'Brutalist Grid']);
   const [activeStyle, setActiveStyle] = useState<string | null>(null);
+  const [aiModel, setAiModel] = useState<string>('gemini-3.5-flash');
+  const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
   
   const [inputValue, setInputValue] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -89,11 +91,11 @@ function App() {
   useEffect(() => {
       const fetchDynamicPlaceholders = async () => {
           try {
-              const apiKey = process.env.API_KEY;
+              const apiKey = customApiKey || process.env.API_KEY;
               if (!apiKey) return;
               const ai = new GoogleGenAI({ apiKey });
               const response = await ai.models.generateContent({
-                  model: 'gemini-3-flash-preview',
+                  model: aiModel,
                   contents: { 
                       role: 'user', 
                       parts: [{ 
@@ -121,41 +123,6 @@ function App() {
     setInputValue(event.target.value);
   };
 
-  const parseJsonStream = async function* (responseStream: AsyncGenerator<{ text: string }>) {
-      let buffer = '';
-      for await (const chunk of responseStream) {
-          const text = chunk.text;
-          if (typeof text !== 'string') continue;
-          buffer += text;
-          let braceCount = 0;
-          let start = buffer.indexOf('{');
-          while (start !== -1) {
-              braceCount = 0;
-              let end = -1;
-              for (let i = start; i < buffer.length; i++) {
-                  if (buffer[i] === '{') braceCount++;
-                  else if (buffer[i] === '}') braceCount--;
-                  if (braceCount === 0 && i > start) {
-                      end = i;
-                      break;
-                  }
-              }
-              if (end !== -1) {
-                  const jsonString = buffer.substring(start, end + 1);
-                  try {
-                      yield JSON.parse(jsonString);
-                      buffer = buffer.substring(end + 1);
-                      start = buffer.indexOf('{');
-                  } catch (e) {
-                      start = buffer.indexOf('{', start + 1);
-                  }
-              } else {
-                  break; 
-              }
-          }
-      }
-  };
-
   const handleGenerateVariations = useCallback(async () => {
     const currentSession = sessions[currentSessionIndex];
     if (!currentSession || focusedArtifactIndex === null) return;
@@ -163,15 +130,15 @@ function App() {
 
     setIsLoading(true);
     setComponentVariations([]);
-    setDrawerState({ isOpen: true, mode: 'variations', title: 'Variations', data: currentArtifact.id });
+    setDrawerState({ isOpen: true, mode: 'variations', title: `Variations for ${currentArtifact.styleName}`, data: currentArtifact.id });
 
     try {
-        const apiKey = process.env.API_KEY;
+        const apiKey = customApiKey || process.env.API_KEY;
         if (!apiKey) throw new Error("API_KEY is not configured.");
         const ai = new GoogleGenAI({ apiKey });
 
         const prompt = `
-You are a master UI/UX designer. Generate 3 RADICAL CONCEPTUAL VARIATIONS of: "${currentSession.prompt}".
+You are a master UI/UX designer. Generate 3 RADICAL CONCEPTUAL VARIATIONS of the following design prompt: "${currentSession.prompt}".
 
 **STRICT IP SAFEGUARD:**
 No names of artists. 
@@ -189,27 +156,40 @@ For EACH variation:
 - Rewrite the prompt to fully adopt that metaphor's visual language.
 - Generate high-fidelity HTML/CSS.
 
-Required JSON Output Format (stream ONE object per line):
-\`{ "name": "Persona Name", "html": "..." }\`
+Return a raw JSON array of exact 3 objects, like this:
+[
+  { "name": "Persona Name 1", "html": "..." },
+  { "name": "Persona Name 2", "html": "..." },
+  { "name": "Persona Name 3", "html": "..." }
+]
         `.trim();
 
-        const responseStream = await ai.models.generateContentStream({
-            model: 'gemini-3-flash-preview',
+        const response = await ai.models.generateContent({
+            model: aiModel,
              contents: [{ parts: [{ text: prompt }], role: 'user' }],
-             config: { temperature: 1.2 }
         });
 
-        for await (const variation of parseJsonStream(responseStream)) {
-            if (variation.name && variation.html) {
-                setComponentVariations(prev => [...prev, variation]);
+        const responseText = response.text || '';
+        const match = responseText.match(/\[[\s\S]*\]/);
+        if (match) {
+            try {
+                const variations = JSON.parse(match[0]);
+                if (Array.isArray(variations)) {
+                    setComponentVariations(variations);
+                }
+            } catch (e) {
+                console.error("Failed to parse variations JSON", e);
             }
+        } else {
+            console.error("No JSON array found in variations output");
         }
+
     } catch (e: any) {
         console.error("Error generating variations:", e);
     } finally {
         setIsLoading(false);
     }
-  }, [sessions, currentSessionIndex, focusedArtifactIndex]);
+  }, [sessions, currentSessionIndex, focusedArtifactIndex, aiModel]);
 
   const applyVariation = (html: string) => {
       if (focusedArtifactIndex === null) return;
@@ -252,6 +232,10 @@ Required JSON Output Format (stream ONE object per line):
 
     const sessionPrompt = activeStyle ? `${trimmedInput} (Style constraint: ${activeStyle})` : trimmedInput;
 
+    const isIteration = sessions.length > 0;
+    const previousSession = isIteration ? sessions[currentSessionIndex] : null;
+    const focusedHtml = (previousSession && focusedArtifactIndex !== null) ? previousSession.artifacts[focusedArtifactIndex].html : null;
+
     const newSession: Session = {
         id: sessionId,
         prompt: sessionPrompt,
@@ -264,17 +248,32 @@ Required JSON Output Format (stream ONE object per line):
     setFocusedArtifactIndex(null); 
 
     try {
-        const apiKey = process.env.API_KEY;
+        const apiKey = customApiKey || process.env.API_KEY;
         if (!apiKey) throw new Error("API_KEY is not configured.");
         const ai = new GoogleGenAI({ apiKey });
 
-        const stylePrompt = activeStyle ? `
+        let stylePrompt = '';
+        if (activeStyle) {
+             stylePrompt = `
 Generate 3 distinct, highly evocative micro-variations of the aesthetic style "${activeStyle}" for the UI: "${trimmedInput}".
 For example, if the aesthetic is "Glassmorphism", the variations could be "Frosted Glassmorphism", "Dark Glassmorphism", "Neon Glassmorphism".
 
 **GOAL:**
 Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions based on "${activeStyle}".
-        `.trim() : `
+        `.trim();
+        } else if (isIteration) {
+             stylePrompt = `
+The user wants to iterate on their previous design with: "${trimmedInput}".
+Generate 3 distinct, highly evocative design directions for this updated request.
+
+**STRICT IP SAFEGUARD:**
+Never use artist or brand names. Use physical and material metaphors.
+
+**GOAL:**
+Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions (e.g. ["Tactile Risograph Press", "Kinetic Silhouette Balance", "Primary Pigment Gridwork"]).
+        `.trim();
+        } else {
+             stylePrompt = `
 Generate 3 distinct, highly evocative design directions for: "${trimmedInput}".
 
 **STRICT IP SAFEGUARD:**
@@ -289,9 +288,10 @@ Never use artist or brand names. Use physical and material metaphors.
 **GOAL:**
 Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions (e.g. ["Tactile Risograph Press", "Kinetic Silhouette Balance", "Primary Pigment Gridwork"]).
         `.trim();
+        }
 
         const styleResponse = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: aiModel,
             contents: { role: 'user', parts: [{ text: stylePrompt }] }
         });
 
@@ -330,7 +330,31 @@ Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions (e.
 
         const generateArtifact = async (artifact: Artifact, styleInstruction: string) => {
             try {
-                const prompt = `
+                let prompt = '';
+                if (focusedHtml) {
+                    prompt = `
+You are Flash UI. The user wants to iterate on an existing UI component.
+
+**USER REQUEST:** "${trimmedInput}"
+
+**CONCEPTUAL DIRECTION FOR THIS VARIATION:** ${styleInstruction}
+
+**VISUAL EXECUTION RULES:**
+1. **Materiality**: Use the specified metaphor to drive every CSS choice. (e.g. if Risograph, use \`feTurbulence\` for grain and \`mix-blend-mode: multiply\` for ink layering).
+2. **Typography**: Use high-quality web fonts. Pair a bold sans-serif with a refined monospace for data.
+3. **Motion**: Include subtle, high-performance CSS/JS animations.
+4. **IP SAFEGUARD**: No artist names or trademarks. 
+
+**PREVIOUS HTML TO MODIFY:**
+\`\`\`html
+${focusedHtml}
+\`\`\`
+
+Based on the previous HTML, apply the user request and the new conceptual direction.
+Return ONLY RAW FULL HTML. No markdown fences.
+          `.trim();
+                } else {
+                    prompt = `
 You are Flash UI. Create a stunning, high-fidelity UI component for: "${trimmedInput}".
 
 **CONCEPTUAL DIRECTION: ${styleInstruction}**
@@ -344,9 +368,10 @@ You are Flash UI. Create a stunning, high-fidelity UI component for: "${trimmedI
 
 Return ONLY RAW HTML. No markdown fences.
           `.trim();
+                }
           
                 const responseStream = await ai.models.generateContentStream({
-                    model: 'gemini-3-flash-preview',
+                    model: aiModel,
                     contents: [{ parts: [{ text: prompt }], role: "user" }],
                 });
 
@@ -401,7 +426,7 @@ Return ONLY RAW HTML. No markdown fences.
         setIsLoading(false);
         setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [inputValue, isLoading, sessions.length]);
+  }, [inputValue, isLoading, sessions.length, activeStyle, aiModel]);
 
   const handleSurpriseMe = () => {
       const currentPrompt = placeholders[placeholderIndex];
@@ -509,7 +534,7 @@ Return ONLY RAW HTML. No markdown fences.
             {isFullscreen ? <MinimizeIcon /> : <FullscreenIcon />}
         </button>
 
-        <div className={`top-right-actions ${hasStarted ? 'hide-on-mobile' : ''}`}>
+        <div className="top-right-actions">
             <button onClick={handleOpenHistory} className="creator-credit" aria-label="History" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <HistoryIcon />
             </button>
@@ -562,11 +587,29 @@ Return ONLY RAW HTML. No markdown fences.
                     <h3 style={{ color: 'var(--text-primary)', marginBottom: '16px', fontSize: '1.2rem', fontWeight: 600 }}>Preferences</h3>
                     <div style={{ marginBottom: '24px' }}>
                         <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>AI Model</label>
-                        <select style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--accent-bg)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
-                            <option value="gemini-3-flash-preview">Gemini 3 Flash Preview (Fast)</option>
-                            <option value="gemini-pro">Gemini Pro (Advanced logic)</option>
+                        <select value={aiModel} onChange={e => setAiModel(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--accent-bg)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
+                            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                            <option value="gemini-3.1-pro-preview-customtools">Gemini 3.1 Pro Preview (Custom Tools)</option>
+                            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
                         </select>
                         <p style={{ fontSize: '0.85rem', marginTop: '8px', opacity: 0.7 }}>Select the model used for UI generation.</p>
+                    </div>
+                    <div style={{ marginBottom: '24px' }}>
+                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Custom API Key</label>
+                        <input 
+                            type="password" 
+                            value={customApiKey}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                setCustomApiKey(val);
+                                localStorage.setItem('gemini_api_key', val);
+                            }}
+                            placeholder="Enter Gemini API Key..."
+                            style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--accent-bg)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                        />
+                        <p style={{ fontSize: '0.85rem', marginTop: '8px', opacity: 0.7 }}>By default, the platform API key is used inside the preview, but you can provide your own to deploy on custom environments like GitHub Pages without a backend server.</p>
                     </div>
 
                     <h3 style={{ color: 'var(--text-primary)', marginBottom: '16px', fontSize: '1.2rem', fontWeight: 600 }}>Saved Styles</h3>
