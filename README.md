@@ -1,11 +1,19 @@
-<div align="center">
+# Flash UI (Fork)
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+This application is a fork of the original Flash UI.
+It is an experimental AI UI generation workspace leveraging `gemini-3-flash-preview` for rapid component iteration and radical style variations.
 
-  <h1>Built with AI Studio</h2>
+## Modified by
+- by petergluk@gmail.com
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## License
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+This project is licensed under [SPDX-License-Identifier: Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
-</div>
+> Apache License 2.0 allows you to use the software for any purpose, distribute it, modify it, and distribute modified versions of the software under the terms of the license. It is highly permissive.
+
+### Key features
+- Dynamic UI placeholders
+- Device viewport switcher (Desktop, Tablet, Mobile)
+- Saved Styles capability
+- Live preview using React and Tailwind
