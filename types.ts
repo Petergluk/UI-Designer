@@ -18,4 +18,3 @@ export interface Session {
 }
 
 export interface ComponentVariation { name: string; html: string; }
-export interface LayoutOption { name: string; css: string; previewHtml: string; }

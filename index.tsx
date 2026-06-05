@@ -9,9 +9,9 @@ import { GoogleGenAI } from '@google/genai';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 
-import { Artifact, Session, ComponentVariation, LayoutOption } from './types';
+import { Artifact, Session, ComponentVariation } from './types';
 import { INITIAL_PLACEHOLDERS } from './constants';
-import { generateId } from './utils';
+import { generateId, extractJsonArray } from './utils';
 
 import DottedGlowBackground from './components/DottedGlowBackground';
 import ArtifactCard from './components/ArtifactCard';
@@ -32,7 +32,8 @@ import {
     MinimizeIcon,
     CopyIcon,
     DownloadIcon,
-    HistoryIcon
+    HistoryIcon,
+    PlusIcon
 } from './components/Icons';
 
 type Viewport = 'desktop' | 'tablet' | 'mobile';
@@ -104,13 +105,10 @@ function App() {
                   }
               });
               const text = response.text || '[]';
-              const jsonMatch = text.match(/\[[\s\S]*\]/);
-              if (jsonMatch) {
-                  const newPlaceholders = JSON.parse(jsonMatch[0]);
-                  if (Array.isArray(newPlaceholders) && newPlaceholders.length > 0) {
-                      const shuffled = newPlaceholders.sort(() => 0.5 - Math.random()).slice(0, 10);
-                      setPlaceholders(prev => [...prev, ...shuffled]);
-                  }
+              const newPlaceholders = extractJsonArray(text);
+              if (newPlaceholders && newPlaceholders.length > 0) {
+                  const shuffled = newPlaceholders.sort(() => 0.5 - Math.random()).slice(0, 10);
+                  setPlaceholders(prev => [...prev, ...shuffled]);
               }
           } catch (e) {
               console.warn("Silently failed to fetch dynamic placeholders", e);
@@ -170,16 +168,9 @@ Return a raw JSON array of exact 3 objects, like this:
         });
 
         const responseText = response.text || '';
-        const match = responseText.match(/\[[\s\S]*\]/);
-        if (match) {
-            try {
-                const variations = JSON.parse(match[0]);
-                if (Array.isArray(variations)) {
-                    setComponentVariations(variations);
-                }
-            } catch (e) {
-                console.error("Failed to parse variations JSON", e);
-            }
+        const variations = extractJsonArray(responseText);
+        if (variations) {
+            setComponentVariations(variations);
         } else {
             console.error("No JSON array found in variations output");
         }
@@ -295,17 +286,9 @@ Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions (e.
             contents: { role: 'user', parts: [{ text: stylePrompt }] }
         });
 
-        let generatedStyles: string[] = [];
+        let generatedStyles: string[] | null = null;
         const styleText = styleResponse.text || '[]';
-        const jsonMatch = styleText.match(/\[[\s\S]*\]/);
-        
-        if (jsonMatch) {
-            try {
-                generatedStyles = JSON.parse(jsonMatch[0]);
-            } catch (e) {
-                console.warn("Failed to parse styles, using fallbacks");
-            }
-        }
+        generatedStyles = extractJsonArray(styleText) as string[] | null;
 
         if (!generatedStyles || generatedStyles.length < 3) {
             generatedStyles = [
@@ -460,6 +443,14 @@ Return ONLY RAW HTML. No markdown fences.
       }
   }, [currentSessionIndex, focusedArtifactIndex]);
 
+  const handleResetWorkspace = () => {
+      setSessions([]);
+      setCurrentSessionIndex(-1);
+      setFocusedArtifactIndex(null);
+      setInputValue('');
+      setDrawerState({ isOpen: false, mode: 'history', title: '', data: null });
+  };
+
   const handleOpenSettings = () => {
       setDrawerState({ isOpen: true, mode: 'settings', title: 'Settings', data: null });
   };
@@ -535,6 +526,9 @@ Return ONLY RAW HTML. No markdown fences.
         </button>
 
         <div className="top-right-actions">
+            <button onClick={handleResetWorkspace} className="creator-credit" aria-label="New Design" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <PlusIcon />
+            </button>
             <button onClick={handleOpenHistory} className="creator-credit" aria-label="History" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <HistoryIcon />
             </button>
@@ -699,7 +693,7 @@ Return ONLY RAW HTML. No markdown fences.
             )}
         </SideDrawer>
 
-        <div className="immersive-app">
+        <div className={`immersive-app ${isFullscreen ? 'is-fullscreen' : ''}`}>
             <DottedGlowBackground 
                 gap={24} 
                 radius={1.5} 
@@ -757,6 +751,8 @@ Return ONLY RAW HTML. No markdown fences.
                     <ArrowRightIcon />
                 </button>
              )}
+
+            <div className="bottom-hover-zone"></div>
 
             <div className={`action-bar ${focusedArtifactIndex !== null ? 'visible' : ''}`}>
                  <div className="active-prompt-label">

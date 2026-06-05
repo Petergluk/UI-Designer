@@ -47,7 +47,7 @@ const ArtifactCard = React.memo(({
                     </div>
                 )}
                 <iframe 
-                    srcDoc={artifact.html} 
+                    srcDoc={artifact.status === 'complete' ? artifact.html : ''} 
                     title={artifact.id} 
                     sandbox="allow-scripts allow-forms allow-modals allow-popups allow-presentation allow-same-origin"
                     className="artifact-iframe"

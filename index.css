@@ -391,6 +391,39 @@ html, body {
     opacity: 0.9;
 }
 
+/* === Fullscreen Hover Zone === */
+.bottom-hover-zone {
+    display: none;
+}
+.immersive-app.is-fullscreen .bottom-hover-zone {
+    display: block;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 180px;
+    z-index: 1000;
+}
+.immersive-app.is-fullscreen .action-bar,
+.immersive-app.is-fullscreen .floating-input-container {
+    opacity: 0 !important;
+    transform: translateY(20px) !important;
+    pointer-events: none !important;
+    transition: opacity 0.3s ease, transform 0.3s ease !important;
+}
+.immersive-app.is-fullscreen .bottom-hover-zone:hover ~ .action-bar.visible,
+.immersive-app.is-fullscreen .action-bar.visible:hover {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
+    pointer-events: auto !important;
+}
+.immersive-app.is-fullscreen .bottom-hover-zone:hover ~ .floating-input-container,
+.immersive-app.is-fullscreen .floating-input-container:hover {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
+    pointer-events: auto !important;
+}
+
 /* === Floating Input === */
 .floating-input-container {
     position: absolute;
