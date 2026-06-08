@@ -13,9 +13,12 @@ import { Artifact, Session, ComponentVariation } from './types';
 import { INITIAL_PLACEHOLDERS, STYLE_GALLERY } from './constants';
 import { generateId, extractJsonArray } from './utils';
 
+import { PROMPTS } from './prompts';
+
 import DottedGlowBackground from './components/DottedGlowBackground';
 import ArtifactCard from './components/ArtifactCard';
 import SideDrawer from './components/SideDrawer';
+import { CodePanel, DesignMdPanel, VariationsPanel, GalleryPanel, SettingsPanel, HistoryPanel } from './components/Panels';
 import { 
     ThinkingIcon, 
     CodeIcon, 
@@ -106,7 +109,7 @@ function App() {
                   contents: { 
                       role: 'user', 
                       parts: [{ 
-                          text: 'Generate 20 creative, short, diverse UI component prompts (e.g. "bioluminescent task list"). Return ONLY a raw JSON array of strings. IP SAFEGUARD: Avoid referencing specific famous artists, movies, or brands.' 
+                          text: PROMPTS.dynamicPlaceholders 
                       }] 
                   }
               });
@@ -178,32 +181,7 @@ function App() {
         if (!apiKey) throw new Error("API_KEY is not configured.");
         const ai = new GoogleGenAI({ apiKey });
 
-        const prompt = `
-You are a master UI/UX designer. Generate 3 RADICAL CONCEPTUAL VARIATIONS of the following design prompt: "${currentSession.prompt}".
-
-**STRICT IP SAFEGUARD:**
-No names of artists. 
-Instead, describe the *Physicality* and *Material Logic* of the UI.
-
-**CREATIVE GUIDANCE (Use these as EXAMPLES of how to describe style, but INVENT YOUR OWN):**
-1. Example: "Asymmetrical Primary Grid" (Heavy black strokes, rectilinear structure, flat primary pigments, high-contrast white space).
-2. Example: "Suspended Kinetic Mobile" (Delicate wire-thin connections, floating organic primary shapes, slow-motion balance, white-void background).
-3. Example: "Grainy Risograph Press" (Overprinted translucent inks, dithered grain textures, monochromatic color depth, raw paper substrate).
-4. Example: "Volumetric Spectral Fluid" (Generative morphing gradients, soft-focus diffusion, bioluminescent light sources, spectral chromatic aberration).
-
-**YOUR TASK:**
-For EACH variation:
-- Invent a unique design persona name based on a NEW physical metaphor.
-- Rewrite the prompt to fully adopt that metaphor's visual language.
-- Generate high-fidelity HTML/CSS.
-
-Return a raw JSON array of exact 3 objects, like this:
-[
-  { "name": "Persona Name 1", "html": "..." },
-  { "name": "Persona Name 2", "html": "..." },
-  { "name": "Persona Name 3", "html": "..." }
-]
-        `.trim();
+        const prompt = PROMPTS.generateVariations(currentSession.prompt);
 
         const response = await ai.models.generateContent({
             model: aiModel,
@@ -261,23 +239,7 @@ Return a raw JSON array of exact 3 objects, like this:
           }
           
           const ai = new GoogleGenAI({ apiKey });
-          const prompt = `You are an expert UI Architect. Analyze the following HTML/CSS code and reverse-engineer a comprehensive DESIGN.md file that tells 'Stitch with Google' (an AI UI generator) how to reproduce this exact design system.
-          
-Structure the DESIGN.md into the following sections:
-- Values: Over-arching design principles and constraints.
-- Colors: Main colors, backgrounds, text colors, and borders (using hex or rgb values).
-- Typography: Font families, font weights, and letter spacing.
-- Spacing & Layout: Grids, paddings, margins, flexbox patterns.
-- Specific Elements: Buttons, inputs, borders, effects (shadows, ripples).
-- CSS conventions: Classes or standard rules applied.
-
-Keep it structured in Markdown syntax. Only output the raw markdown string. Do NOT wrap it in a code block.
-
-HTML to analyze:
-\`\`\`html
-${artifact.html}
-\`\`\`
-`;
+          const prompt = PROMPTS.generateDesignMd(artifact.html);
           const response = await ai.models.generateContent({
                model: aiModel,
                contents: [{ parts: [{ text: prompt }], role: 'user' }],
@@ -360,42 +322,9 @@ ${artifact.html}
             try {
                 let prompt = '';
                 if (focusedHtml) {
-                    prompt = `
-You are Flash UI. The user wants to iterate on an existing UI component.
-
-**USER REQUEST:** "${trimmedInput}"
-
-**CONCEPTUAL DIRECTION FOR THIS VARIATION:** ${styleInstruction}
-
-**VISUAL EXECUTION RULES:**
-1. **Materiality**: Use the specified metaphor to drive every CSS choice. (e.g. if Risograph, use \`feTurbulence\` for grain and \`mix-blend-mode: multiply\` for ink layering).
-2. **Typography**: Use high-quality web fonts. Pair a bold sans-serif with a refined monospace for data.
-3. **Motion**: Include subtle, high-performance CSS/JS animations.
-4. **IP SAFEGUARD**: No artist names or trademarks. 
-
-**PREVIOUS HTML TO MODIFY:**
-\`\`\`html
-${focusedHtml}
-\`\`\`
-
-Based on the previous HTML, apply the user request and the new conceptual direction.
-Return ONLY RAW FULL HTML. No markdown fences.
-          `.trim();
+                    prompt = PROMPTS.refineComponent(trimmedInput, styleInstruction, focusedHtml);
                 } else {
-                    prompt = `
-You are Flash UI. Create a stunning, high-fidelity UI component for: "${trimmedInput}".
-
-**CONCEPTUAL DIRECTION: ${styleInstruction}**
-
-**VISUAL EXECUTION RULES:**
-1. **Materiality**: Use the specified metaphor to drive every CSS choice. (e.g. if Risograph, use \`feTurbulence\` for grain and \`mix-blend-mode: multiply\` for ink layering).
-2. **Typography**: Use high-quality web fonts. Pair a bold sans-serif with a refined monospace for data.
-3. **Motion**: Include subtle, high-performance CSS/JS animations (hover transitions, entry reveals).
-4. **IP SAFEGUARD**: No artist names or trademarks. 
-5. **Layout**: Be bold with negative space and hierarchy. Avoid generic cards.
-
-Return ONLY RAW HTML. No markdown fences.
-          `.trim();
+                    prompt = PROMPTS.createComponent(trimmedInput, styleInstruction);
                 }
           
                 const parts: any[] = [{ text: prompt }];
@@ -652,197 +581,58 @@ Return ONLY RAW HTML. No markdown fences.
             )}
 
             {drawerState.mode === 'code' && (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', justifyContent: 'flex-end', padding: '0 24px' }}>
-                        <button onClick={handleCopyCode} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', background: 'var(--input-bg)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: '99px', cursor: 'pointer' }}>
-                            <CopyIcon /> Copy
-                        </button>
-                        <button onClick={handleDownloadCode} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', background: 'var(--text-primary)', border: '1px solid transparent', color: 'var(--app-bg)', borderRadius: '99px', cursor: 'pointer', fontWeight: 500 }}>
-                            <DownloadIcon /> Save HTML
-                        </button>
-                    </div>
-                    <pre className="code-block" style={{ flex: 1, margin: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0 }}><code>{drawerState.data}</code></pre>
-                </div>
+                <CodePanel 
+                    data={drawerState.data as string}
+                    handleCopyCode={handleCopyCode}
+                    handleDownloadCode={handleDownloadCode}
+                />
             )}
             
             {drawerState.mode === 'design-md' && (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', justifyContent: 'flex-end', padding: '0 24px' }}>
-                        <button onClick={handleDownloadDesignFile} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', background: 'var(--text-primary)', border: '1px solid transparent', color: 'var(--app-bg)', borderRadius: '99px', cursor: 'pointer', fontWeight: 500 }}>
-                            <DownloadIcon /> Save DESIGN.md
-                        </button>
-                    </div>
-                    <pre className="code-block" style={{ flex: 1, margin: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, whiteSpace: 'pre-wrap' }}><code>{drawerState.data}</code></pre>
-                </div>
+                <DesignMdPanel 
+                    data={drawerState.data as string}
+                    handleDownloadDesignFile={handleDownloadDesignFile}
+                />
             )}
             
             {drawerState.mode === 'variations' && (
-                <div className="sexy-grid">
-                    {componentVariations.map((v, i) => (
-                         <div key={i} className="sexy-card" onClick={() => applyVariation(v.html)}>
-                             <div className="sexy-preview">
-                                 <iframe srcDoc={v.html} title={v.name} sandbox="allow-scripts allow-same-origin" />
-                             </div>
-                             <div className="sexy-label">{v.name}</div>
-                         </div>
-                    ))}
-                </div>
+                <VariationsPanel 
+                    variations={componentVariations}
+                    applyVariation={applyVariation}
+                />
             )}
 
             {drawerState.mode === 'gallery' && (
-                <div style={{ padding: '24px' }}>
-                    <h3 style={{ color: 'var(--text-primary)', marginBottom: '16px', fontSize: '1.2rem', fontWeight: 600 }}>
-                        {focusedArtifactIndex !== null ? 'Choose a style to refine' : 'Select up to 3 visual styles'}
-                    </h3>
-                    <div className="gallery-grid">
-                        {STYLE_GALLERY.map(style => {
-                            const isSelected = focusedArtifactIndex === null && selectedStyles.includes(style.id);
-                            return (
-                                <div 
-                                    key={style.id} 
-                                    className={`gallery-item ${isSelected ? 'selected' : ''}`}
-                                    onClick={() => {
-                                        if (focusedArtifactIndex !== null) {
-                                            setDrawerState(s => ({ ...s, isOpen: false }));
-                                            handleSendMessage(undefined, style.name);
-                                        } else {
-                                            toggleStyleSelection(style.id);
-                                        }
-                                    }}
-                                >
-                                     <div className="gallery-image-wrapper">
-                                        <img src={style.image} alt={style.name} />
-                                     </div>
-                                     <div className="gallery-text-content">
-                                         <div className="label">{style.name}</div>
-                                         <div className="description">{style.description}</div>
-                                     </div>
-                                </div>
-                            )
-                        })}
-                    </div>
-                    {focusedArtifactIndex === null && (
-                        <div style={{ marginTop: '24px', textAlign: 'center', opacity: 0.7, fontSize: '0.85rem' }}>
-                            Your next prompt will generate variations in these {selectedStyles.length} styles.
-                        </div>
-                    )}
-                </div>
+                <GalleryPanel 
+                    focusedArtifactIndex={focusedArtifactIndex}
+                    selectedStyles={selectedStyles}
+                    toggleStyleSelection={toggleStyleSelection}
+                    onStyleSelect={(styleName) => {
+                        setDrawerState(s => ({ ...s, isOpen: false }));
+                        handleSendMessage(undefined, styleName);
+                    }}
+                />
             )}
 
             {drawerState.mode === 'settings' && (
-                <div className="settings-container" style={{ padding: '24px', color: 'var(--text-secondary)' }}>
-                    <h3 style={{ color: 'var(--text-primary)', marginBottom: '16px', fontSize: '1.2rem', fontWeight: 600 }}>Preferences</h3>
-                    <div style={{ marginBottom: '24px' }}>
-                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>AI Model</label>
-                        <select value={aiModel} onChange={e => setAiModel(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--accent-bg)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
-                            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
-                            <option value="gemini-3.1-pro-preview-customtools">Gemini 3.1 Pro Preview (Custom Tools)</option>
-                            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                        </select>
-                        <p style={{ fontSize: '0.85rem', marginTop: '8px', opacity: 0.7 }}>Select the model used for UI generation.</p>
-                    </div>
-                    <div style={{ marginBottom: '24px' }}>
-                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Custom API Key</label>
-                        <input 
-                            type="password" 
-                            value={customApiKey}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                setCustomApiKey(val);
-                                localStorage.setItem('gemini_api_key', val);
-                            }}
-                            placeholder="Enter Gemini API Key..."
-                            style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--accent-bg)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
-                        />
-                        <p style={{ fontSize: '0.85rem', marginTop: '8px', opacity: 0.7 }}>By default, the platform API key is used inside the preview, but you can provide your own to deploy on custom environments like GitHub Pages without a backend server.</p>
-                    </div>
-
-                    <h3 style={{ color: 'var(--text-primary)', marginBottom: '16px', fontSize: '1.2rem', fontWeight: 600 }}>Saved Styles</h3>
-                    <div style={{ marginBottom: '24px' }}>
-                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                             {savedStyles.map(s => (
-                                 <span 
-                                     key={s} 
-                                     onClick={() => setActiveStyle(prev => prev === s ? null : s)}
-                                     style={{ 
-                                         padding: '6px 12px', 
-                                         background: activeStyle === s ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)', 
-                                         color: activeStyle === s ? '#fff' : 'inherit',
-                                         borderRadius: '99px', 
-                                         fontSize: '0.85rem',
-                                         cursor: 'pointer',
-                                         border: activeStyle === s ? '1px solid rgba(255,255,255,0.5)' : '1px solid transparent',
-                                         transition: 'all 0.2s ease'
-                                     }}
-                                 >
-                                     {s}
-                                 </span>
-                             ))}
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                             <input 
-                                 type="text" 
-                                 id="newStyleInput" 
-                                 placeholder="New style name..." 
-                                 style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', background: 'var(--input-bg)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: '0.9rem' }}
-                                 onKeyDown={(e) => {
-                                     if (e.key === 'Enter') {
-                                         const val = e.currentTarget.value.trim();
-                                         if (val && !savedStyles.includes(val)) {
-                                             setSavedStyles(prev => [...prev, val]);
-                                             setActiveStyle(val);
-                                         }
-                                         e.currentTarget.value = '';
-                                     }
-                                 }}
-                             />
-                             <button onClick={() => {
-                                 const input = document.getElementById('newStyleInput') as HTMLInputElement;
-                                 const val = input?.value.trim();
-                                 if (val && !savedStyles.includes(val)) {
-                                     setSavedStyles(prev => [...prev, val]);
-                                     setActiveStyle(val);
-                                 }
-                                 if (input) input.value = '';
-                             }} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.15)', cursor: 'pointer', borderRadius: '8px', border: 'none', color: '#fff', fontSize: '0.9rem', fontWeight: 500 }}>Save</button>
-                        </div>
-                        <p style={{ fontSize: '0.85rem', marginTop: '12px', opacity: 0.7 }}>Select a style above to apply it to your next generation prompt. Add new custom styles using the input field.</p>
-                    </div>
-                </div>
+                <SettingsPanel 
+                    aiModel={aiModel} setAiModel={setAiModel}
+                    customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
+                    savedStyles={savedStyles} setSavedStyles={setSavedStyles}
+                    activeStyle={activeStyle} setActiveStyle={setActiveStyle}
+                />
             )}
 
             {drawerState.mode === 'history' && (
-                <div style={{ padding: '24px', color: 'var(--text-secondary)' }}>
-                    {sessions.length === 0 ? (
-                        <p>No generated iterations yet.</p>
-                    ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {sessions.map((sess, idx) => (
-                                <div 
-                                    key={sess.id} 
-                                    onClick={() => {
-                                        setCurrentSessionIndex(idx);
-                                        setFocusedArtifactIndex(null);
-                                        setDrawerState(s => ({...s, isOpen: false}));
-                                    }}
-                                    style={{ 
-                                        padding: '16px', 
-                                        background: idx === currentSessionIndex ? 'rgba(255,255,255,0.1)' : 'var(--input-bg)', 
-                                        borderRadius: '8px', 
-                                        cursor: 'pointer',
-                                        border: idx === currentSessionIndex ? '1px solid rgba(255,255,255,0.2)' : '1px solid var(--border-color)',
-                                        transition: 'all 0.2s ease'
-                                    }}
-                                >
-                                    <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginBottom: '8px', lineHeight: '1.4' }}>{sess.prompt}</div>
-                                    <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>Iteration {idx + 1} &bull; {new Date(sess.timestamp).toLocaleTimeString()}</div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                <HistoryPanel 
+                    sessions={sessions}
+                    currentSessionIndex={currentSessionIndex}
+                    onSelectSession={(idx) => {
+                        setCurrentSessionIndex(idx);
+                        setFocusedArtifactIndex(null);
+                        setDrawerState(s => ({...s, isOpen: false}));
+                    }}
+                />
             )}
         </SideDrawer>
 
