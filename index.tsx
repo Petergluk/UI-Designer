@@ -435,6 +435,10 @@ Return ONLY RAW HTML. No markdown fences.
                 if (finalHtml.startsWith('```html')) finalHtml = finalHtml.substring(7).trimStart();
                 if (finalHtml.startsWith('```')) finalHtml = finalHtml.substring(3).trimStart();
                 if (finalHtml.endsWith('```')) finalHtml = finalHtml.substring(0, finalHtml.length - 3).trimEnd();
+                
+                if (!finalHtml) {
+                    finalHtml = `<div style="color: white; padding: 24px; font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; background: #111; box-sizing: border-box;"><h2 style="margin:0 0 12px 0;">No UI Generated</h2><p style="text-align: center; max-width: 400px; color: rgba(255,255,255,0.7);">The AI returned an empty response. Please try modifying your prompt.</p></div>`;
+                }
 
                 setSessions(prev => prev.map(sess => 
                     sess.id === sessionId ? {
@@ -451,7 +455,7 @@ Return ONLY RAW HTML. No markdown fences.
                     sess.id === sessionId ? {
                         ...sess,
                         artifacts: sess.artifacts.map(art => 
-                            art.id === artifact.id ? { ...art, html: `<div style="color: #ff6b6b; padding: 20px;">Error: ${e.message}</div>`, status: 'error' } : art
+                            art.id === artifact.id ? { ...art, html: `<div style="color: #ff6b6b; padding: 24px; font-family: sans-serif; height: 100vh; background: #2a0808; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; box-sizing: border-box;"><h2>Generation Error</h2><p>${e.message}</p></div>`, status: 'error' } : art
                         )
                     } : sess
                 ));
@@ -460,8 +464,16 @@ Return ONLY RAW HTML. No markdown fences.
 
         await Promise.all(placeholderArtifacts.map((art, i) => generateArtifact(art, targetStyleNames[i])));
 
-    } catch (e) {
+    } catch (e: any) {
         console.error("Fatal error in generation process", e);
+        setSessions(prev => prev.map(sess => 
+            sess.id === sessionId ? {
+                ...sess,
+                artifacts: sess.artifacts.map(art => 
+                    art.status === 'streaming' ? { ...art, html: `<div style="color: #ff6b6b; padding: 24px; font-family: sans-serif; height: 100vh; background: #2a0808; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; box-sizing: border-box;"><h2>Generation Fatal Error</h2><p>${e.message}</p></div>`, status: 'error' } : art
+                )
+            } : sess
+        ));
     } finally {
         setIsLoading(false);
         setTimeout(() => inputRef.current?.focus(), 100);
@@ -586,7 +598,7 @@ Return ONLY RAW HTML. No markdown fences.
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          const safeTitle = drawerState.title.replace(/[^a-z0-9]/gi, '-').toLowerCase() || 'export';
+          const safeTitle = drawerState.title.replace('Source - ', '').replace(/[^a-z0-9а-яё]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'export';
           a.download = `${safeTitle}.html`;
           a.click();
           URL.revokeObjectURL(url);
