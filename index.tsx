@@ -10,7 +10,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 
 import { Artifact, Session, ComponentVariation } from './types';
-import { INITIAL_PLACEHOLDERS } from './constants';
+import { INITIAL_PLACEHOLDERS, STYLE_GALLERY } from './constants';
 import { generateId, extractJsonArray } from './utils';
 
 import DottedGlowBackground from './components/DottedGlowBackground';
@@ -33,7 +33,11 @@ import {
     CopyIcon,
     DownloadIcon,
     HistoryIcon,
-    PlusIcon
+    PlusIcon,
+    ImageIcon,
+    TrashIcon,
+    GalleryIcon,
+    PaletteIcon
 } from './components/Icons';
 
 type Viewport = 'desktop' | 'tablet' | 'mobile';
@@ -46,6 +50,7 @@ function App() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [savedStyles, setSavedStyles] = useState<string[]>(['Glassmorphism', 'Brutalist Grid']);
   const [activeStyle, setActiveStyle] = useState<string | null>(null);
+  const [selectedStyles, setSelectedStyles] = useState<string[]>(['minimalist', 'glass', 'brutalist']);
   const [aiModel, setAiModel] = useState<string>('gemini-3.5-flash');
   const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || '');
   
@@ -53,10 +58,11 @@ function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [placeholders, setPlaceholders] = useState<string[]>(INITIAL_PLACEHOLDERS);
+  const [images, setImages] = useState<{base64: string; mimeType: string; dataUrl: string}[]>([]);
   
   const [drawerState, setDrawerState] = useState<{
       isOpen: boolean;
-      mode: 'code' | 'variations' | 'settings' | 'history' | null;
+      mode: 'code' | 'variations' | 'settings' | 'history' | 'gallery' | null;
       title: string;
       data: any; 
   }>({ isOpen: false, mode: null, title: '', data: null });
@@ -119,6 +125,43 @@ function App() {
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(event.target.value);
+  };
+
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImages(prev => [...prev, {
+          base64: (reader.result as string).split(',')[1],
+          mimeType: file.type,
+          dataUrl: reader.result as string
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    // Reset file input value so same file can be selected again if needed
+    if (event.target) {
+        event.target.value = '';
+    }
+  };
+
+  const removeImage = (indexToRemove: number) => {
+    setImages(prev => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  const handleDeleteArtifact = (sessionIndex: number, artifactId: string) => {
+    setSessions(prev => prev.map((s, sIdx) => {
+        if (sIdx !== sessionIndex) return s;
+        return {
+            ...s,
+            artifacts: s.artifacts.filter(a => a.id !== artifactId)
+        };
+    }).filter(s => s.artifacts.length > 0)); // Optional: remove session if all artifacts deleted
+
+    if (sessionIndex === currentSessionIndex && focusedArtifactIndex !== null) {
+        setFocusedArtifactIndex(null);
+    }
   };
 
   const handleGenerateVariations = useCallback(async () => {
@@ -203,29 +246,96 @@ Return a raw JSON array of exact 3 objects, like this:
       }
   };
 
-  const handleSendMessage = useCallback(async (manualPrompt?: string) => {
-    const promptToUse = manualPrompt || inputValue;
+  const handleGenerateDesignMd = async () => {
+      const currentSession = sessions[currentSessionIndex];
+      if (!currentSession || focusedArtifactIndex === null) return;
+      const artifact = currentSession.artifacts[focusedArtifactIndex];
+      
+      setDrawerState({ isOpen: true, mode: 'design-md', title: 'DESIGN.md for Stitch', data: 'Analyzing design and generating DESIGN.md instructions...' });
+      
+      try {
+          const apiKey = customApiKey || process.env.API_KEY;
+          if (!apiKey) {
+             setDrawerState(s => ({...s, data: 'API Key not configured. Please add your Gemini API Key in Settings.'}));
+             return;
+          }
+          
+          const ai = new GoogleGenAI({ apiKey });
+          const prompt = `You are an expert UI Architect. Analyze the following HTML/CSS code and reverse-engineer a comprehensive DESIGN.md file that tells 'Stitch with Google' (an AI UI generator) how to reproduce this exact design system.
+          
+Structure the DESIGN.md into the following sections:
+- Values: Over-arching design principles and constraints.
+- Colors: Main colors, backgrounds, text colors, and borders (using hex or rgb values).
+- Typography: Font families, font weights, and letter spacing.
+- Spacing & Layout: Grids, paddings, margins, flexbox patterns.
+- Specific Elements: Buttons, inputs, borders, effects (shadows, ripples).
+- CSS conventions: Classes or standard rules applied.
+
+Keep it structured in Markdown syntax. Only output the raw markdown string. Do NOT wrap it in a code block.
+
+HTML to analyze:
+\`\`\`html
+${artifact.html}
+\`\`\`
+`;
+          const response = await ai.models.generateContent({
+               model: aiModel,
+               contents: [{ parts: [{ text: prompt }], role: 'user' }],
+          });
+  
+          let mdText = response.text || 'Failed to generate DESIGN.md';
+          mdText = mdText.replace(/^\`\`\`(markdown)?\n?/, '').replace(/\n\`\`\`$/, '');
+          setDrawerState(s => ({ ...s, data: mdText }));
+      } catch (e: any) {
+          console.error("Error generating DESIGN.md:", e);
+          setDrawerState(s => ({...s, data: 'Error generating DESIGN.md: ' + e.message}));
+      }
+  };
+
+  const handleSendMessage = useCallback(async (manualPrompt?: string, styleOverride?: string) => {
+    let promptToUse = manualPrompt || inputValue;
+    const isTargetedRefinement = currentSessionIndex >= 0 && sessions[currentSessionIndex] && focusedArtifactIndex !== null;
+
+    if (!promptToUse.trim() && styleOverride && isTargetedRefinement) {
+        promptToUse = "Translate this design strictly to the new style. Keep all functional content and structure intact.";
+    }
+
     const trimmedInput = promptToUse.trim();
     
     if (!trimmedInput || isLoading) return;
-    if (!manualPrompt) setInputValue('');
+    if (!manualPrompt && !styleOverride) setInputValue('');
 
     setIsLoading(true);
     const baseTime = Date.now();
     const sessionId = generateId();
 
-    const placeholderArtifacts: Artifact[] = Array(3).fill(null).map((_, i) => ({
+    let targetStyleNames: string[] = [];
+    if (styleOverride) {
+        targetStyleNames = [styleOverride];
+    } else if (isTargetedRefinement) {
+        targetStyleNames = [sessions[currentSessionIndex].artifacts[focusedArtifactIndex].styleName];
+    } else {
+        targetStyleNames = selectedStyles.length > 0 
+           ? selectedStyles.map(id => {
+               const found = STYLE_GALLERY.find(s => s.id === id);
+               return found ? found.name : id;
+           })
+           : ['Минимализм'];
+    }
+
+    // fallback mapping if STYLE_GALLERY isn't directly accessible in this scope properly yet (we will import it in next step)
+    
+    const placeholderArtifacts: Artifact[] = targetStyleNames.map((styleName, i) => ({
         id: `${sessionId}_${i}`,
-        styleName: 'Designing...',
+        styleName: styleName,
         html: '',
         status: 'streaming',
     }));
 
-    const sessionPrompt = activeStyle ? `${trimmedInput} (Style constraint: ${activeStyle})` : trimmedInput;
+    const sessionPrompt = styleOverride ? `${trimmedInput} (${styleOverride})` : trimmedInput;
 
-    const isIteration = sessions.length > 0;
-    const previousSession = isIteration ? sessions[currentSessionIndex] : null;
-    const focusedHtml = (previousSession && focusedArtifactIndex !== null) ? previousSession.artifacts[focusedArtifactIndex].html : null;
+    const previousSession = isTargetedRefinement ? sessions[currentSessionIndex] : null;
+    const focusedHtml = isTargetedRefinement ? previousSession?.artifacts[focusedArtifactIndex]?.html : null;
 
     const newSession: Session = {
         id: sessionId,
@@ -236,80 +346,15 @@ Return a raw JSON array of exact 3 objects, like this:
 
     setSessions(prev => [...prev, newSession]);
     setCurrentSessionIndex(sessions.length); 
-    setFocusedArtifactIndex(null); 
+    setFocusedArtifactIndex(isTargetedRefinement ? 0 : null); 
+    
+    const currentImages = [...images];
+    setImages([]);
 
     try {
         const apiKey = customApiKey || process.env.API_KEY;
         if (!apiKey) throw new Error("API_KEY is not configured.");
         const ai = new GoogleGenAI({ apiKey });
-
-        let stylePrompt = '';
-        if (activeStyle) {
-             stylePrompt = `
-Generate 3 distinct, highly evocative micro-variations of the aesthetic style "${activeStyle}" for the UI: "${trimmedInput}".
-For example, if the aesthetic is "Glassmorphism", the variations could be "Frosted Glassmorphism", "Dark Glassmorphism", "Neon Glassmorphism".
-
-**GOAL:**
-Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions based on "${activeStyle}".
-        `.trim();
-        } else if (isIteration) {
-             stylePrompt = `
-The user wants to iterate on their previous design with: "${trimmedInput}".
-Generate 3 distinct, highly evocative design directions for this updated request.
-
-**STRICT IP SAFEGUARD:**
-Never use artist or brand names. Use physical and material metaphors.
-
-**GOAL:**
-Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions (e.g. ["Tactile Risograph Press", "Kinetic Silhouette Balance", "Primary Pigment Gridwork"]).
-        `.trim();
-        } else {
-             stylePrompt = `
-Generate 3 distinct, highly evocative design directions for: "${trimmedInput}".
-
-**STRICT IP SAFEGUARD:**
-Never use artist or brand names. Use physical and material metaphors.
-
-**CREATIVE EXAMPLES (Do not simply copy these, use them as a guide for tone):**
-- Example A: "Asymmetrical Rectilinear Blockwork" (Grid-heavy, primary pigments, thick structural strokes, Bauhaus-functionalism vibe).
-- Example B: "Grainy Risograph Layering" (Tactile paper texture, overprinted translucent inks, dithered gradients).
-- Example C: "Kinetic Wireframe Suspension" (Floating silhouettes, thin balancing lines, organic primary shapes).
-- Example D: "Spectral Prismatic Diffusion" (Glassmorphism, caustic refraction, soft-focus morphing gradients).
-
-**GOAL:**
-Return ONLY a raw JSON array of 3 *NEW*, creative names for these directions (e.g. ["Tactile Risograph Press", "Kinetic Silhouette Balance", "Primary Pigment Gridwork"]).
-        `.trim();
-        }
-
-        const styleResponse = await ai.models.generateContent({
-            model: aiModel,
-            contents: { role: 'user', parts: [{ text: stylePrompt }] }
-        });
-
-        let generatedStyles: string[] | null = null;
-        const styleText = styleResponse.text || '[]';
-        generatedStyles = extractJsonArray(styleText) as string[] | null;
-
-        if (!generatedStyles || generatedStyles.length < 3) {
-            generatedStyles = [
-                "Primary Pigment Gridwork",
-                "Tactile Risograph Layering",
-                "Kinetic Silhouette Balance"
-            ];
-        }
-        
-        generatedStyles = generatedStyles.slice(0, 3);
-
-        setSessions(prev => prev.map(s => {
-            if (s.id !== sessionId) return s;
-            return {
-                ...s,
-                artifacts: s.artifacts.map((art, i) => ({
-                    ...art,
-                    styleName: generatedStyles[i]
-                }))
-            };
-        }));
 
         const generateArtifact = async (artifact: Artifact, styleInstruction: string) => {
             try {
@@ -353,9 +398,21 @@ Return ONLY RAW HTML. No markdown fences.
           `.trim();
                 }
           
+                const parts: any[] = [{ text: prompt }];
+                if (currentImages.length > 0) {
+                     currentImages.forEach(img => {
+                         parts.push({
+                             inlineData: {
+                                 data: img.base64,
+                                 mimeType: img.mimeType
+                             }
+                         });
+                     });
+                }
+                
                 const responseStream = await ai.models.generateContentStream({
                     model: aiModel,
-                    contents: [{ parts: [{ text: prompt }], role: "user" }],
+                    contents: [{ parts, role: "user" }],
                 });
 
                 let accumulatedHtml = '';
@@ -401,7 +458,7 @@ Return ONLY RAW HTML. No markdown fences.
             }
         };
 
-        await Promise.all(placeholderArtifacts.map((art, i) => generateArtifact(art, generatedStyles[i])));
+        await Promise.all(placeholderArtifacts.map((art, i) => generateArtifact(art, targetStyleNames[i])));
 
     } catch (e) {
         console.error("Fatal error in generation process", e);
@@ -453,6 +510,23 @@ Return ONLY RAW HTML. No markdown fences.
 
   const handleOpenSettings = () => {
       setDrawerState({ isOpen: true, mode: 'settings', title: 'Settings', data: null });
+  };
+
+  const handleOpenGallery = () => {
+      setDrawerState({ isOpen: true, mode: 'gallery', title: 'Style Gallery', data: null });
+  };
+
+  const toggleStyleSelection = (id: string) => {
+      setSelectedStyles(prev => {
+          if (prev.includes(id)) {
+              if (prev.length === 1) return prev;
+              return prev.filter(s => s !== id);
+          }
+          if (prev.length >= 3) {
+              return [...prev.slice(1), id];
+          }
+          return [...prev, id];
+      });
   };
 
   const handleOpenHistory = () => {
@@ -519,6 +593,18 @@ Return ONLY RAW HTML. No markdown fences.
       }
   };
 
+  const handleDownloadDesignFile = () => {
+      if (drawerState.data) {
+          const blob = new Blob([drawerState.data], { type: 'text/markdown' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'DESIGN.md';
+          a.click();
+          URL.revokeObjectURL(url);
+      }
+  };
+
   return (
     <>
         <button onClick={toggleFullscreen} className="fullscreen-button" aria-label="Toggle Fullscreen" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -526,13 +612,16 @@ Return ONLY RAW HTML. No markdown fences.
         </button>
 
         <div className="top-right-actions">
-            <button onClick={handleResetWorkspace} className="creator-credit" aria-label="New Design" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <button onClick={handleResetWorkspace} className="creator-credit" aria-label="New Design" title="New Design" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <PlusIcon />
             </button>
-            <button onClick={handleOpenHistory} className="creator-credit" aria-label="History" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <button onClick={handleOpenGallery} className="creator-credit" aria-label="Gallery" title="Style Gallery" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <GalleryIcon />
+            </button>
+            <button onClick={handleOpenHistory} className="creator-credit" aria-label="History" title="Prompt History" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <HistoryIcon />
             </button>
-            <button onClick={handleOpenSettings} className="creator-credit" aria-label="Settings" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <button onClick={handleOpenSettings} className="creator-credit" aria-label="Settings" title="Settings" style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <SettingsIcon />
             </button>
         </div>
@@ -541,6 +630,7 @@ Return ONLY RAW HTML. No markdown fences.
             isOpen={drawerState.isOpen} 
             onClose={() => setDrawerState(s => ({...s, isOpen: false}))} 
             title={drawerState.title}
+            fullScreen={drawerState.mode === 'gallery'}
         >
             {isLoadingDrawer && (
                  <div className="loading-state">
@@ -563,6 +653,17 @@ Return ONLY RAW HTML. No markdown fences.
                 </div>
             )}
             
+            {drawerState.mode === 'design-md' && (
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', justifyContent: 'flex-end', padding: '0 24px' }}>
+                        <button onClick={handleDownloadDesignFile} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', background: 'var(--text-primary)', border: '1px solid transparent', color: 'var(--app-bg)', borderRadius: '99px', cursor: 'pointer', fontWeight: 500 }}>
+                            <DownloadIcon /> Save DESIGN.md
+                        </button>
+                    </div>
+                    <pre className="code-block" style={{ flex: 1, margin: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, whiteSpace: 'pre-wrap' }}><code>{drawerState.data}</code></pre>
+                </div>
+            )}
+            
             {drawerState.mode === 'variations' && (
                 <div className="sexy-grid">
                     {componentVariations.map((v, i) => (
@@ -573,6 +674,46 @@ Return ONLY RAW HTML. No markdown fences.
                              <div className="sexy-label">{v.name}</div>
                          </div>
                     ))}
+                </div>
+            )}
+
+            {drawerState.mode === 'gallery' && (
+                <div style={{ padding: '24px' }}>
+                    <h3 style={{ color: 'var(--text-primary)', marginBottom: '16px', fontSize: '1.2rem', fontWeight: 600 }}>
+                        {focusedArtifactIndex !== null ? 'Choose a style to refine' : 'Select up to 3 visual styles'}
+                    </h3>
+                    <div className="gallery-grid">
+                        {STYLE_GALLERY.map(style => {
+                            const isSelected = focusedArtifactIndex === null && selectedStyles.includes(style.id);
+                            return (
+                                <div 
+                                    key={style.id} 
+                                    className={`gallery-item ${isSelected ? 'selected' : ''}`}
+                                    onClick={() => {
+                                        if (focusedArtifactIndex !== null) {
+                                            setDrawerState(s => ({ ...s, isOpen: false }));
+                                            handleSendMessage(undefined, style.name);
+                                        } else {
+                                            toggleStyleSelection(style.id);
+                                        }
+                                    }}
+                                >
+                                     <div className="gallery-image-wrapper">
+                                        <img src={style.image} alt={style.name} />
+                                     </div>
+                                     <div className="gallery-text-content">
+                                         <div className="label">{style.name}</div>
+                                         <div className="description">{style.description}</div>
+                                     </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                    {focusedArtifactIndex === null && (
+                        <div style={{ marginTop: '24px', textAlign: 'center', opacity: 0.7, fontSize: '0.85rem' }}>
+                            Your next prompt will generate variations in these {selectedStyles.length} styles.
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -731,6 +872,7 @@ Return ONLY RAW HTML. No markdown fences.
                                             artifact={artifact}
                                             isFocused={isFocused}
                                             onClick={() => setFocusedArtifactIndex(aIndex)}
+                                            onDelete={() => handleDeleteArtifact(sIndex, artifact.id)}
                                             viewport={isFocused ? viewport : 'desktop'}
                                         />
                                     );
@@ -752,64 +894,89 @@ Return ONLY RAW HTML. No markdown fences.
                 </button>
              )}
 
-            <div className="bottom-hover-zone"></div>
-
-            <div className={`action-bar ${focusedArtifactIndex !== null ? 'visible' : ''}`}>
-                 <div className="active-prompt-label">
-                    {currentSession?.prompt}
-                 </div>
-                 <div style={{display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center'}}>
-                     <div className="action-buttons-group">
-                         <button onClick={() => setViewport('desktop')} className={viewport === 'desktop' ? 'active-viewport' : ''} aria-label="Desktop view" title="Desktop view">
-                             <DesktopIcon />
-                         </button>
-                         <button onClick={() => setViewport('tablet')} className={viewport === 'tablet' ? 'active-viewport' : ''} aria-label="Tablet view" title="Tablet view">
-                             <TabletIcon />
-                         </button>
-                         <button onClick={() => setViewport('mobile')} className={viewport === 'mobile' ? 'active-viewport' : ''} aria-label="Mobile view" title="Mobile view">
-                             <MobileIcon />
-                         </button>
+            <div className={`bottom-ui-layer ${isFullscreen ? 'fullscreen-controls' : ''}`}>
+                <div className={`action-bar ${focusedArtifactIndex !== null ? 'visible' : ''}`}>
+                     <div className="active-prompt-label">
+                        {currentSession?.prompt}
                      </div>
-                     <div className="action-buttons">
-                        <button onClick={() => setFocusedArtifactIndex(null)}>
-                            <GridIcon /> Grid View
-                        </button>
-                        <button onClick={handleGenerateVariations} disabled={isLoading}>
-                            <SparklesIcon /> Variations
-                        </button>
-                        <button onClick={handleShowCode}>
-                            <CodeIcon /> Source
-                        </button>
+                     <div style={{display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center'}}>
+                         <div className="action-buttons-group">
+                             <button onClick={() => setViewport('desktop')} className={viewport === 'desktop' ? 'active-viewport' : ''} aria-label="Desktop view" title="Desktop view">
+                                 <DesktopIcon />
+                             </button>
+                             <button onClick={() => setViewport('tablet')} className={viewport === 'tablet' ? 'active-viewport' : ''} aria-label="Tablet view" title="Tablet view">
+                                 <TabletIcon />
+                             </button>
+                             <button onClick={() => setViewport('mobile')} className={viewport === 'mobile' ? 'active-viewport' : ''} aria-label="Mobile view" title="Mobile view">
+                                 <MobileIcon />
+                             </button>
+                         </div>
+                         <div className="action-buttons">
+                            <button onClick={() => setFocusedArtifactIndex(null)}>
+                                <GridIcon /> Grid View
+                            </button>
+                            <button onClick={handleOpenGallery} disabled={isLoading}>
+                                <PaletteIcon /> Change Style
+                            </button>
+                            <button onClick={handleGenerateVariations} disabled={isLoading}>
+                                <SparklesIcon /> Variations
+                            </button>
+                            <button onClick={handleShowCode}>
+                                <CodeIcon /> Source
+                            </button>
+                            <button onClick={handleGenerateDesignMd}>
+                                <DownloadIcon /> DESIGN.md
+                            </button>
+                         </div>
                      </div>
-                 </div>
-            </div>
+                </div>
 
-            <div className="floating-input-container">
-                <div className={`input-wrapper ${isLoading ? 'loading' : ''}`}>
-                    {(!inputValue && !isLoading) && (
-                        <div className="animated-placeholder" key={placeholderIndex}>
-                            <span className="placeholder-text">{placeholders[placeholderIndex]}</span>
-                            <span className="tab-hint">Tab</span>
+                <div className="floating-input-container" style={{ flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                    {images.length > 0 && (
+                        <div style={{ display: 'flex', gap: '8px', maxWidth: '800px', width: '100%', padding: '0 24px' }}>
+                             {images.map((img, i) => (
+                                 <div key={i} style={{ position: 'relative', width: '56px', height: '56px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
+                                    <img src={img.dataUrl} alt="Upload" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    <button onClick={() => removeImage(i)} style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', color: '#fff', cursor: 'pointer', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', lineHeight: '14px' }}>&times;</button>
+                                 </div>
+                             ))}
                         </div>
                     )}
-                    {!isLoading ? (
-                        <input 
-                            ref={inputRef}
-                            type="text" 
-                            value={inputValue} 
-                            onChange={handleInputChange} 
-                            onKeyDown={handleKeyDown} 
-                            disabled={isLoading} 
-                        />
-                    ) : (
-                        <div className="input-generating-label">
-                            <span className="generating-prompt-text">{currentSession?.prompt}</span>
-                            <ThinkingIcon />
+                    <div style={{ display: 'flex', gap: '8px', width: '100%', maxWidth: '660px', padding: '0 20px', alignItems: 'center', justifyContent: 'center' }}>
+                        <button onClick={handleOpenGallery} className="gallery-open-button" aria-label="Style Gallery" title="Style Gallery">
+                            <GalleryIcon />
+                        </button>
+                        <label className="gallery-open-button" style={{ cursor: 'pointer', margin: 0 }} aria-label="Upload Image" title="Upload Image">
+                            <input type="file" multiple accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} disabled={isLoading} />
+                            <ImageIcon />
+                        </label>
+                        <div className={`input-wrapper ${isLoading ? 'loading' : ''}`}>
+                            {(!inputValue && !isLoading) && (
+                                <div className="animated-placeholder" key={placeholderIndex} style={{ left: '24px' }}>
+                                    <span className="placeholder-text">{placeholders[placeholderIndex]}</span>
+                                    <span className="tab-hint">Tab</span>
+                                </div>
+                            )}
+                            {!isLoading ? (
+                                <input 
+                                    ref={inputRef}
+                                    type="text" 
+                                    value={inputValue} 
+                                    onChange={handleInputChange} 
+                                    onKeyDown={handleKeyDown} 
+                                    disabled={isLoading}
+                                />
+                            ) : (
+                                <div className="input-generating-label">
+                                    <span className="generating-prompt-text">{currentSession?.prompt}</span>
+                                    <ThinkingIcon />
+                                </div>
+                            )}
+                            <button className="send-button" onClick={() => handleSendMessage()} disabled={isLoading || !inputValue.trim()}>
+                                <ArrowUpIcon />
+                            </button>
                         </div>
-                    )}
-                    <button className="send-button" onClick={() => handleSendMessage()} disabled={isLoading || !inputValue.trim()}>
-                        <ArrowUpIcon />
-                    </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -819,6 +986,8 @@ Return ONLY RAW HTML. No markdown fences.
 
 const rootElement = document.getElementById('root');
 if (rootElement) {
-  const root = ReactDOM.createRoot(rootElement);
-  root.render(<React.StrictMode><App /></React.StrictMode>);
+  if (!(window as any)._reactRoot) {
+    (window as any)._reactRoot = ReactDOM.createRoot(rootElement);
+  }
+  (window as any)._reactRoot.render(<React.StrictMode><App /></React.StrictMode>);
 }

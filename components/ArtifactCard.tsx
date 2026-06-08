@@ -5,11 +5,13 @@
 
 import React, { useEffect, useRef } from 'react';
 import { Artifact } from '../types';
+import { TrashIcon } from './Icons';
 
 interface ArtifactCardProps {
     artifact: Artifact;
     isFocused: boolean;
     onClick: () => void;
+    onDelete?: () => void;
     viewport?: 'desktop' | 'tablet' | 'mobile';
 }
 
@@ -17,6 +19,7 @@ const ArtifactCard = React.memo(({
     artifact, 
     isFocused, 
     onClick,
+    onDelete,
     viewport = 'desktop'
 }: ArtifactCardProps) => {
     const codeRef = useRef<HTMLPreElement>(null);
@@ -37,6 +40,16 @@ const ArtifactCard = React.memo(({
         >
             <div className="artifact-header">
                 <span className="artifact-style-tag">{artifact.styleName}</span>
+                {onDelete && (
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onDelete(); }} 
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        aria-label="Delete Artifact"
+                        title="Delete"
+                    >
+                        <TrashIcon />
+                    </button>
+                )}
             </div>
             <div className="artifact-card-inner">
                 {isBlurring && (

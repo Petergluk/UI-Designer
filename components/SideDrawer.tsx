@@ -10,14 +10,15 @@ interface SideDrawerProps {
     onClose: () => void;
     title: string;
     children?: React.ReactNode;
+    fullScreen?: boolean;
 }
 
-const SideDrawer = ({ isOpen, onClose, title, children }: SideDrawerProps) => {
+const SideDrawer = ({ isOpen, onClose, title, children, fullScreen = false }: SideDrawerProps) => {
     if (!isOpen) return null;
 
     return (
-        <div className="drawer-overlay" onClick={onClose}>
-            <div className="drawer-content" onClick={(e) => e.stopPropagation()}>
+        <div className={`drawer-overlay ${fullScreen ? 'fullscreen-overlay' : ''}`} onClick={onClose}>
+            <div className={`drawer-content ${fullScreen ? 'fullscreen-content' : ''}`} onClick={(e) => e.stopPropagation()}>
                 <div className="drawer-header">
                     <h2>{title}</h2>
                     <button onClick={onClose} className="close-button">&times;</button>

@@ -391,46 +391,117 @@ html, body {
     opacity: 0.9;
 }
 
-/* === Fullscreen Hover Zone === */
-.bottom-hover-zone {
-    display: none;
-}
-.immersive-app.is-fullscreen .bottom-hover-zone {
-    display: block;
+.bottom-ui-layer {
     position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
-    height: 180px;
-    z-index: 1000;
+    z-index: 100 !important;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
 }
-.immersive-app.is-fullscreen .action-bar,
-.immersive-app.is-fullscreen .floating-input-container {
-    opacity: 0 !important;
-    transform: translateY(20px) !important;
-    pointer-events: none !important;
-    transition: opacity 0.3s ease, transform 0.3s ease !important;
+.bottom-ui-layer.fullscreen-controls {
+    z-index: 1001 !important;
+    height: 180px; /* capture hover area */
+    pointer-events: auto; /* Allow hovering in this area */
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.3s ease;
 }
-.immersive-app.is-fullscreen .bottom-hover-zone:hover ~ .action-bar.visible,
-.immersive-app.is-fullscreen .action-bar.visible:hover {
-    opacity: 1 !important;
-    transform: translateY(0) !important;
-    pointer-events: auto !important;
+.bottom-ui-layer.fullscreen-controls:hover,
+.bottom-ui-layer.fullscreen-controls:focus-within {
+    opacity: 1;
+    transform: translateY(0);
 }
-.immersive-app.is-fullscreen .bottom-hover-zone:hover ~ .floating-input-container,
-.immersive-app.is-fullscreen .floating-input-container:hover {
-    opacity: 1 !important;
-    transform: translateY(0) !important;
-    pointer-events: auto !important;
+
+.gallery-open-button {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    pointer-events: auto;
+    flex-shrink: 0;
+}
+.gallery-open-button:hover {
+    color: var(--text-primary);
+    transform: scale(1.05);
+}
+
+/* === Style Gallery === */
+.gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 20px;
+    padding: 0;
+    max-height: calc(90vh - 140px);
+    overflow-y: auto;
+}
+.gallery-item {
+    position: relative;
+    border-radius: 12px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.2s;
+    background: rgba(255,255,255,0.03);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.gallery-item.selected {
+    border-color: #fff;
+    transform: scale(0.98);
+    box-shadow: 0 0 20px rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.1);
+}
+.gallery-image-wrapper {
+    width: 100%;
+    height: 140px;
+    overflow: hidden;
+    position: relative;
+}
+.gallery-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.7;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.gallery-item:hover img {
+    opacity: 1;
+    transform: scale(1.05);
+}
+.gallery-text-content {
+    padding: 12px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.gallery-item .label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+}
+.gallery-item .description {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
 }
 
 /* === Floating Input === */
 .floating-input-container {
-    position: absolute;
-    bottom: 30px;
     width: 100%;
+    margin-bottom: 30px;
     display: flex; justify-content: center;
-    z-index: 100;
     padding: 0 20px; box-sizing: border-box;
     pointer-events: none;
 }
@@ -552,12 +623,11 @@ html, body {
 
 /* === Action Bar === */
 .action-bar {
-    position: absolute;
-    bottom: 100px;
     display: flex; flex-direction: column; align-items: center; gap: 12px;
     opacity: 0; transform: translateY(20px);
     transition: all 0.4s ease-out 0.2s;
-    z-index: 90; pointer-events: none;
+    pointer-events: none;
+    margin-bottom: 24px;
 }
 .action-bar.visible { opacity: 1; transform: translateY(0); }
 .active-prompt-label {
@@ -631,6 +701,10 @@ html, body {
     position: fixed; inset: 0; background: rgba(0,0,0,0.3); backdrop-filter: blur(4px);
     z-index: 200; display: flex; justify-content: flex-end;
 }
+.drawer-overlay.fullscreen-overlay {
+    justify-content: center;
+    align-items: center;
+}
 .drawer-content {
     width: 100%; max-width: 420px;
     background: rgba(9, 9, 11, 0.85);
@@ -641,6 +715,16 @@ html, body {
     animation: slideInRight 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
     box-shadow: -20px 0 50px rgba(0,0,0,0.5);
 }
+.drawer-content.fullscreen-content {
+    max-width: 1200px;
+    width: 95vw;
+    height: 90vh;
+    border-radius: 12px;
+    border-left: none;
+    border: 1px solid var(--glass-border);
+    animation: fadeInScale 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes fadeInScale { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
 .drawer-header {
@@ -747,7 +831,6 @@ html, body {
     }
 
     .action-bar {
-        bottom: 90px;
         width: 100%;
         gap: 8px;
     }
@@ -759,7 +842,6 @@ html, body {
     
     .floating-input-container {
         padding: 0 10px;
-        bottom: 20px;
     }
 
     /* Scaling previews in side drawer on mobile */
