@@ -55,9 +55,9 @@ You are Flash UI. The user wants to iterate on an existing UI component.
 **CONCEPTUAL DIRECTION FOR THIS VARIATION:** ${styleInstruction}
 
 **VISUAL EXECUTION RULES:**
-1. **Materiality**: Use the specified metaphor to drive every CSS choice. (e.g. if Risograph, use \`feTurbulence\` for grain and \`mix-blend-mode: multiply\` for ink layering).
-2. **Typography**: Use high-quality web fonts. Pair a bold sans-serif with a refined monospace for data.
-3. **Motion**: Include subtle, high-performance CSS/JS animations.
+1. **Materiality**: You MUST DRASTICALLY change the CSS to strictly match the new style. Do NOT just return the old HTML. Entirely rewrite the colors, borders, typography, background textures, and layout structure to vividly exhibit the requested visual identity.
+2. **Typography**: Change the web fonts to match the new style's mood.
+3. **Structure**: Keep the semantic content but feel free to modify the DOM structure (tags, classes) if needed to achieve the new aesthetic.
 4. **IP SAFEGUARD**: No artist names or trademarks. 
 
 **PREVIOUS HTML TO MODIFY:**
@@ -65,7 +65,6 @@ You are Flash UI. The user wants to iterate on an existing UI component.
 ${previousHtml}
 \`\`\`
 
-Based on the previous HTML, apply the user request and the new conceptual direction.
 Return ONLY RAW FULL HTML. No markdown fences.
 `.trim(),
 
